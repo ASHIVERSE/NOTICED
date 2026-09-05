@@ -1,11 +1,16 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.auth import get_current_user
 from app.database.database import get_db
 from app.models.stock import Stock
 from app.services.market_engine import get_market_data
 
-router = APIRouter(prefix="/attention", tags=["Attention"])
+
+router = APIRouter(
+    prefix="/attention",
+    tags=["Attention"],
+)
 
 
 PRICE_ANOMALY_THRESHOLD = 1.25
@@ -45,7 +50,12 @@ def calculate_typical_move(history):
     )
 
 
-def calculate_attention(stock, data, market_change, sector_change):
+def calculate_attention(
+    stock,
+    data,
+    market_change,
+    sector_change,
+):
 
     signals = []
     score = 0
@@ -53,7 +63,9 @@ def calculate_attention(stock, data, market_change, sector_change):
     price_change = data["price_change"]
     volume_ratio = data["volume_ratio"]
 
-    typical_move = calculate_typical_move(data["history"])
+    typical_move = calculate_typical_move(
+        data["history"]
+    )
 
     self_move_ratio = (
         abs(price_change) / typical_move
@@ -61,8 +73,13 @@ def calculate_attention(stock, data, market_change, sector_change):
         else 0
     )
 
-    relative_to_market = price_change - market_change
-    relative_to_sector = price_change - sector_change
+    relative_to_market = (
+        price_change - market_change
+    )
+
+    relative_to_sector = (
+        price_change - sector_change
+    )
 
     # ---------------------------------------------------------
     # 1. SELF-RELATIVE PRICE ANOMALY
@@ -191,15 +208,12 @@ def calculate_attention(stock, data, market_change, sector_change):
         "attention_score": score,
         "attention_level": level,
         "signals": signals,
-
         "typical_move": round(typical_move, 2),
         "self_move_ratio": round(self_move_ratio, 2),
-
         "relative_to_market": round(
             relative_to_market,
             2,
         ),
-
         "relative_to_sector": round(
             relative_to_sector,
             2,
@@ -210,9 +224,32 @@ def calculate_attention(stock, data, market_change, sector_change):
 @router.get("/")
 def get_attention_feed(
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
 
-    stocks = db.query(Stock).all()
+    # ---------------------------------------------------------
+    # USER AUTHENTICATION
+    # ---------------------------------------------------------
+
+    user_id = current_user["id"]
+
+    # IMPORTANT:
+    # Only load stocks belonging to this authenticated user.
+    stocks = (
+        db.query(Stock)
+        .filter(Stock.user_id == user_id)
+        .all()
+    )
+
+    # ---------------------------------------------------------
+    # Empty watchlist
+    # ---------------------------------------------------------
+
+    if not stocks:
+        return {
+            "count": 0,
+            "feed": [],
+        }
 
     market_data = {}
 
@@ -222,7 +259,9 @@ def get_attention_feed(
 
     for stock in stocks:
 
-        data = get_market_data(stock.symbol)
+        data = get_market_data(
+            stock.symbol
+        )
 
         if data:
             market_data[stock.symbol] = data
@@ -256,7 +295,9 @@ def get_attention_feed(
 
     for stock in stocks:
 
-        data = market_data.get(stock.symbol)
+        data = market_data.get(
+            stock.symbol
+        )
 
         if not data:
             continue
@@ -278,8 +319,8 @@ def get_attention_feed(
                 )
 
         sector_change = (
-            sum(sector_changes) /
-            len(sector_changes)
+            sum(sector_changes)
+            / len(sector_changes)
             if sector_changes
             else 0
         )
@@ -371,7 +412,10 @@ def get_attention_feed(
                 ],
         })
 
+    # ---------------------------------------------------------
     # Highest attention first
+    # ---------------------------------------------------------
+
     feed.sort(
         key=lambda item:
             item["attention_score"],

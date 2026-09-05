@@ -6,13 +6,27 @@ import {
   useRef,
   useState,
 } from "react";
-
+import { supabase } from "@/lib/supabase";
 import type { ReactNode } from "react";
 
 
 const API =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://127.0.0.1:8000";
+
+async function getAuthHeaders() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session) {
+    throw new Error("You are not logged in.");
+  }
+
+  return {
+    Authorization: `Bearer ${session.access_token}`,
+  };
+}
 
 
 // =========================================================
@@ -470,11 +484,14 @@ export default function Home() {
       setRefreshing(true);
       setError("");
 
+      const headers = await getAuthHeaders();
+
       const response =
         await fetch(
           `${API}/attention/`,
           {
             cache: "no-store",
+            headers,
           }
         );
 
@@ -959,11 +976,14 @@ export default function Home() {
         });
 
 
+      const headers = await getAuthHeaders();
+
       const response =
         await fetch(
           `${API}/watchlist/?${params.toString()}`,
           {
             method: "POST",
+            headers,
           }
         );
 
@@ -1010,11 +1030,14 @@ export default function Home() {
       setError("");
 
 
+      const headers = await getAuthHeaders();
+
       const response =
         await fetch(
           `${API}/watchlist/${symbol}`,
           {
             method: "DELETE",
+            headers,
           }
         );
 
@@ -1165,6 +1188,17 @@ export default function Home() {
               {refreshing
                 ? "..."
                 : "↻"}
+            </button>
+
+            <button
+              type="button"
+              onClick={async () => {
+                await supabase.auth.signOut();
+                window.location.href = "/login";
+              }}
+              className="rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-300 hover:bg-white/5"
+            >
+              Logout
             </button>
 
           </div>
