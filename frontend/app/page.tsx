@@ -6,13 +6,18 @@ import {
   useRef,
   useState,
 } from "react";
+
+import { useRouter } from "next/navigation";
+
 import { supabase } from "@/lib/supabase";
+
 import type { ReactNode } from "react";
 
 
 const API =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://127.0.0.1:8000";
+
 
 async function getAuthHeaders() {
   const {
@@ -27,7 +32,6 @@ async function getAuthHeaders() {
     Authorization: `Bearer ${session.access_token}`,
   };
 }
-
 
 // =========================================================
 // TYPES
@@ -341,7 +345,7 @@ function MiniChart({
 // =========================================================
 
 export default function Home() {
-
+  const router = useRouter();
   const [stocks, setStocks] =
     useState<Stock[]>([]);
 
@@ -496,6 +500,19 @@ export default function Home() {
         );
 
       if (!response.ok) {
+        const message = await response.text();
+
+        console.error(
+          "LOAD DATA ERROR:",
+          response.status,
+          message
+        );
+
+        if (response.status === 401) {
+          throw new Error(
+            "Your login session has expired. Please log in again."
+          );
+        }
 
         throw new Error(
           "Unable to load market data"
@@ -553,21 +570,47 @@ export default function Home() {
   // =======================================================
 
   useEffect(() => {
+  let cancelled = false;
+
+  async function initialize() {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (cancelled) {
+      return;
+    }
+
+    // Logged-out visitors should start with account creation.
+    if (!session) {
+      router.replace("/signup");
+      return;
+    }
+
+    // Logged-in users continue to the dashboard.
+    loadData();
+  }
+
+  initialize();
+
+  const interval = setInterval(async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      router.replace("/signup");
+      return;
+    }
 
     loadData();
+  }, 60_000);
 
-    const interval =
-      setInterval(
-        loadData,
-        60_000
-      );
-
-    return () =>
-      clearInterval(
-        interval
-      );
-
-  }, []);
+  return () => {
+    cancelled = true;
+    clearInterval(interval);
+  };
+}, [router]);
 
 
   // =======================================================
@@ -944,12 +987,7 @@ export default function Home() {
   // =======================================================
 
   async function addStock() {
-
-    if (
-      !addSymbol.trim() ||
-      !addName.trim()
-    ) {
-
+    if (!addSymbol.trim() || !addName.trim()) {
       setError(
         "Enter both a stock symbol and company name."
       );
@@ -957,12 +995,9 @@ export default function Home() {
       return;
     }
 
-
     try {
-
       setAdding(true);
       setError("");
-
 
       const params =
         new URLSearchParams({
@@ -975,7 +1010,6 @@ export default function Home() {
             addName.trim(),
         });
 
-
       const headers = await getAuthHeaders();
 
       const response =
@@ -987,31 +1021,50 @@ export default function Home() {
           }
         );
 
-
       if (!response.ok) {
+        const message = await response.text();
+
+        console.error(
+          "ADD STOCK ERROR:",
+          response.status,
+          message
+        );
+
+        if (response.status === 401) {
+          throw new Error(
+            "Your login session has expired. Please log in again."
+          );
+        }
+
+        if (response.status === 409) {
+          throw new Error(
+            "This stock is already in your watchlist."
+          );
+        }
 
         throw new Error(
           "Could not add stock"
         );
       }
 
-
       setAddSymbol("");
       setAddName("");
 
-
+      // Reload so the newly added stock appears
+      // with its market signals.
       await loadData();
 
     } catch (err) {
-
       console.error(err);
 
-      setError(
-        "Could not add this stock."
-      );
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Could not add this stock.";
+
+      setError(message);
 
     } finally {
-
       setAdding(false);
     }
   }
@@ -1024,11 +1077,8 @@ export default function Home() {
   async function removeStock(
     symbol: string
   ) {
-
     try {
-
       setError("");
-
 
       const headers = await getAuthHeaders();
 
@@ -1041,14 +1091,25 @@ export default function Home() {
           }
         );
 
-
       if (!response.ok) {
+        const message = await response.text();
+
+        console.error(
+          "REMOVE STOCK ERROR:",
+          response.status,
+          message
+        );
+
+        if (response.status === 401) {
+          throw new Error(
+            "Your login session has expired. Please log in again."
+          );
+        }
 
         throw new Error(
           "Could not remove stock"
         );
       }
-
 
       const remaining =
         stocks.filter(
@@ -1057,17 +1118,14 @@ export default function Home() {
             symbol
         );
 
-
       setStocks(
         remaining
       );
-
 
       if (
         selected?.symbol ===
         symbol
       ) {
-
         setSelected(
           remaining[0] ||
           null
@@ -1075,12 +1133,14 @@ export default function Home() {
       }
 
     } catch (err) {
-
       console.error(err);
 
-      setError(
-        "Could not remove this stock."
-      );
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Could not remove this stock.";
+
+      setError(message);
     }
   }
 
